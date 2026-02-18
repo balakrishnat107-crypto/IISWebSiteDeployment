@@ -1,18 +1,66 @@
-name: Deploy to IIS
+name: CI-CD to IIS
 
 on:
   push:
     branches:
       - main
 
+env:
+  DEPLOY_PATH: C:\inetpub\wwwroot\mysite
+
 jobs:
-  deploy:
+
+  # -------------------------
+  # 1️⃣ CI - Build & Artifact
+  # -------------------------
+  build:
     runs-on: self-hosted
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Deploy to IIS folder
+      - name: Generate Version
+        id: version
+        shell: powershell
         run: |
-          xcopy /E /I /Y * C:\inetpub\wwwroot\mysite\
+          $date = Get-Date -Format "ddMMyyyy"
+          $runNumber = "{0:D3}" -f $env:GITHUB_RUN_NUMBER
+          $version = "$date$runNumber"
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+          echo "Generated Version: $version"
+
+      - name: Create Artifact Folder
+        run: |
+          mkdir artifact
+          xcopy /E /I /Y * artifact\
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: website-${{ steps.version.outputs.version }}
+          path: artifact/
+
+  # -------------------------
+  # 2️⃣ CD - Manual Approval + Deploy
+  # -------------------------
+  deploy:
+    needs: build
+    runs-on: self-hosted
+    environment:
+      name: production   # This enables approval
+      url: http://localhost/mysite
+
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: website-${{ needs.build.outputs.version }}
+          path: deploy
+
+      - name: Deploy to IIS
+        run: |
+          robocopy deploy ${{ env.DEPLOY_PATH }} /MIR
