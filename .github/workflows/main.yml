@@ -34,23 +34,26 @@ jobs:
           Write-Host "Generated version: $version"
           echo "version=$version" >> $env:GITHUB_OUTPUT
 
-      # Upload entire repo as artifact
+      # Upload repo as artifact (excluding .github)
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: website-${{ steps.version.outputs.version }}
-          path: .
+          path: |
+            *
+            !.github/**
           if-no-files-found: error
 
+
   # =====================================================
-  # 2️⃣ CD STAGE - Approval + Deploy
+  # 2️⃣ CD STAGE - Manual Approval + Deploy
   # =====================================================
   deploy:
     needs: build
     runs-on: self-hosted
 
     environment:
-      name: production   # must match environment name in repo
+      name: production
       url: http://localhost/mysite
 
     steps:
@@ -60,16 +63,21 @@ jobs:
           name: website-${{ needs.build.outputs.version }}
           path: deploy
 
-      # Optional: Stop IIS before deploy
       - name: Stop IIS
         run: iisreset /stop
 
-      # Clean mirror deploy (recommended)
-      - name: Deploy to IIS
+      - name: Deploy to IIS (Safe Robocopy)
+        shell: powershell
         run: |
-          robocopy deploy ${{ env.DEPLOY_PATH }} /MIR
+          robocopy deploy $env:DEPLOY_PATH /MIR /XD .github
+          if ($LASTEXITCODE -lt 8) {
+              Write-Host "Robocopy completed successfully."
+              exit 0
+          } else {
+              Write-Host "Robocopy failed with exit code $LASTEXITCODE"
+              exit $LASTEXITCODE
+          }
 
-      # Start IIS again
       - name: Start IIS
         run: iisreset /start
 
